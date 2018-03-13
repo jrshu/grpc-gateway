@@ -67,9 +67,9 @@ func getEnumDefault(enum *descriptor.Enum) string {
 }
 
 // messageToQueryParameters converts a message to a list of swagger query parameters.
-func messageToQueryParameters(message *descriptor.Message, reg *descriptor.Registry, pathParams []descriptor.Parameter) (params []swaggerParameterObject, err error) {
+func messageToQueryParameters(message *descriptor.Message, reg *descriptor.Registry, mappedFields []*descriptor.Field) (params []swaggerParameterObject, err error) {
 	for _, field := range message.Fields {
-		p, err := queryParams(message, field, "", reg, pathParams)
+		p, err := queryParams(message, field, "", reg, mappedFields)
 		if err != nil {
 			return nil, err
 		}
@@ -79,10 +79,10 @@ func messageToQueryParameters(message *descriptor.Message, reg *descriptor.Regis
 }
 
 // queryParams converts a field to a list of swagger query parameters recuresively.
-func queryParams(message *descriptor.Message, field *descriptor.Field, prefix string, reg *descriptor.Registry, pathParams []descriptor.Parameter) (params []swaggerParameterObject, err error) {
+func queryParams(message *descriptor.Message, field *descriptor.Field, prefix string, reg *descriptor.Registry, mappedFields []*descriptor.Field) (params []swaggerParameterObject, err error) {
 	// make sure the parameter is not already listed as a path parameter
-	for _, pathParam := range pathParams {
-		if pathParam.Target == field {
+	for _, mappedField := range mappedFields {
+		if mappedField == field {
 			return nil, nil
 		}
 	}
@@ -145,7 +145,7 @@ func queryParams(message *descriptor.Message, field *descriptor.Field, prefix st
 		return nil, fmt.Errorf("unknown message type %s", fieldType)
 	}
 	for _, nestedField := range msg.Fields {
-		p, err := queryParams(msg, nestedField, prefix+field.GetName()+".", reg, pathParams)
+		p, err := queryParams(msg, nestedField, prefix+field.GetName()+".", reg, mappedFields)
 		if err != nil {
 			return nil, err
 		}
@@ -521,6 +521,9 @@ func renderServices(services []*descriptor.Service, paths swaggerPathsObject, re
 			for bIdx, b := range meth.Bindings {
 				// Iterate over all the swagger parameters
 				parameters := swaggerParametersObject{}
+				mappedFields := make([]*descriptor.Field, 0, 32)
+				allFieldsMappped := false
+
 				for _, parameter := range b.PathParams {
 
 					var paramType, paramFormat string
@@ -552,10 +555,12 @@ func renderServices(services []*descriptor.Service, paths swaggerPathsObject, re
 						Type:   paramType,
 						Format: paramFormat,
 					})
+					mappedFields = append(mappedFields, parameter.Target)
 				}
 				// Now check if there is a body parameter
 				if b.Body != nil {
 					var schema swaggerSchemaObject
+					var fieldName string
 
 					if len(b.Body.FieldPath) == 0 {
 						schema = swaggerSchemaObject{
@@ -563,9 +568,13 @@ func renderServices(services []*descriptor.Service, paths swaggerPathsObject, re
 								Ref: fmt.Sprintf("#/definitions/%s", fullyQualifiedNameToSwaggerName(meth.RequestType.FQMN(), reg)),
 							},
 						}
+						fieldName = "body1"
+						allFieldsMappped = true
 					} else {
 						lastField := b.Body.FieldPath[len(b.Body.FieldPath)-1]
 						schema = schemaOfField(lastField.Target, reg)
+						fieldName = lastField.Name
+						mappedFields = append(mappedFields, lastField.Target)
 					}
 
 					desc := ""
@@ -573,15 +582,17 @@ func renderServices(services []*descriptor.Service, paths swaggerPathsObject, re
 						desc = "(streaming inputs)"
 					}
 					parameters = append(parameters, swaggerParameterObject{
-						Name:        "body",
+						Name:        fieldName,
 						Description: desc,
 						In:          "body",
 						Required:    true,
 						Schema:      &schema,
 					})
-				} else if b.HTTPMethod == "GET" {
+				}
+				// if not all fields are mapped to path and body
+				if !allFieldsMappped {
 					// add the parameters to the query string
-					queryParams, err := messageToQueryParameters(meth.RequestType, reg, b.PathParams)
+					queryParams, err := messageToQueryParameters(meth.RequestType, reg, mappedFields)
 					if err != nil {
 						return err
 					}

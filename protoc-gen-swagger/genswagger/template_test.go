@@ -184,7 +184,7 @@ func TestMessageToQueryParameters(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to lookup message: %s", err)
 		}
-		params, err := messageToQueryParameters(message, reg, []descriptor.Parameter{})
+		params, err := messageToQueryParameters(message, reg, []*descriptor.Field{})
 		if err != nil {
 			t.Fatalf("failed to convert message to query parameters: %s", err)
 		}
